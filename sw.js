@@ -1,6 +1,6 @@
 /* TEE Tracker service worker — stale-while-revalidate, offline-first.
    Bump VERSION on every release so old caches are removed on activate. */
-const VERSION = 'v1';
+const VERSION = 'v2';
 const PREFIX = 'tee-tracker-';
 const CACHE = PREFIX + VERSION;
 

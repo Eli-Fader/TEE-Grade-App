@@ -18,12 +18,13 @@
 <header class="bg-indigo-900 text-white shadow sticky top-0 z-10">
   <div class="max-w-6xl mx-auto px-4 py-3 flex flex-wrap items-center gap-3">
     <h1 class="font-bold text-lg mr-2">TEE Tracker</h1>
-    <select id="selCenter" class="sel" data-chg="center"></select>
+    <div id="navSel" class="flex flex-wrap items-center gap-3"><select id="selCenter" class="sel" data-chg="center"></select>
     <span class="opacity-50">➔</span>
     <select id="selCohort" class="sel" data-chg="cohort"></select>
     <span class="opacity-50">➔</span>
-    <select id="selCourse" class="sel" data-chg="course"></select>
-    <span id="levelBadge" class="ml-auto text-xs font-semibold px-2 py-1 rounded-full"></span>
+    <select id="selCourse" class="sel" data-chg="course"></select></div>
+    <span id="levelBadge" class="text-xs font-semibold px-2 py-1 rounded-full"></span>
+    <div id="userBox" class="ml-auto flex items-center gap-2 text-sm"></div>
   </div>
   <nav id="tabs" class="max-w-6xl mx-auto px-4 flex gap-1"></nav>
 </header>
@@ -58,7 +59,7 @@ function seed() {
       {id:'crs2', cohortId:'coh2', name:'Systematic Theology', level:'diploma'}
     ],
     students: [], sessions: [], attendance: {}, assignments: [], grades: {},
-    sel: {center:'ctr1', cohort:'coh1', course:'crs1'}, tab: 'roster', gradeMeta: {}
+    sel: {center:'ctr1', cohort:'coh1', course:'crs1'}, tab: 'roster', gradeMeta: {}, config: {coordinatorUrl: ''}, teacherCohorts: {teacher1: ['coh1'], teacher2: ['coh2']}
   };
   const mk = (sid, name, cohortId) => { const st = {id:uid(), studentId:sid, name, cohortId, active:true}; s.students.push(st); return st; };
   const a1 = mk('TEE-1001','Ayşe Demir','coh1'), a2 = mk('TEE-1002','Mehmet Kaya','coh1');
@@ -90,7 +91,7 @@ function seed() {
 
 /* ---------- State ---------- */
 let S;
-function load() { try { const r = localStorage.getItem(KEY); S = r ? JSON.parse(r) : seed(); } catch(e) { S = seed(); } if (!r_ok()) S = seed(); S.gradeMeta = S.gradeMeta || {}; save(); }
+function load() { try { const r = localStorage.getItem(KEY); S = r ? JSON.parse(r) : seed(); } catch(e) { S = seed(); } if (!r_ok()) S = seed(); S.gradeMeta = S.gradeMeta || {}; S.config = S.config || {coordinatorUrl: ''}; S.teacherCohorts = S.teacherCohorts || {teacher1: ['coh1'], teacher2: ['coh2']}; save(); }
 function r_ok() { return S && S.centers && S.sel; }
 function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch(e) { console.warn('Storage unavailable', e); } }
 
@@ -121,18 +122,22 @@ function fillSelect(el, items, val) {
   el.innerHTML = items.map(i => `<option value="${i.id}" ${i.id===val?'selected':''}>${esc(i.name)}</option>`).join('') || '<option>— none —</option>';
 }
 function renderHeader() {
-  fillSelect($('#selCenter'), S.centers, S.sel.center);
-  fillSelect($('#selCohort'), S.cohorts.filter(c => c.centerId === S.sel.center), S.sel.cohort);
+  $('#navSel').classList.toggle('hidden', !user()); renderUser();
+  fillSelect($('#selCenter'), S.centers.filter(x => S.cohorts.some(c => c.centerId === x.id && allowedCohort(c.id))), S.sel.center);
+  fillSelect($('#selCohort'), S.cohorts.filter(c => c.centerId === S.sel.center && allowedCohort(c.id)), S.sel.cohort);
   fillSelect($('#selCourse'), S.courses.filter(c => c.cohortId === S.sel.cohort), S.sel.course);
-  const c = course(), b = $('#levelBadge');
+  const c = user() ? course() : null, b = $('#levelBadge');
   b.textContent = c ? (c.level === 'certificate' ? '🔒 Certificate Level' : '✏️ Diploma Level') : '';
-  b.className = 'ml-auto text-xs font-semibold px-2 py-1 rounded-full ' + (c && c.level === 'certificate' ? 'bg-sky-200 text-sky-900' : 'bg-violet-200 text-violet-900');
-  $('#tabs').innerHTML = [['roster','Roster'],['attendance','Attendance'],['gradebook','Gradebook'],['hub','Data Hub']].map(([k,l]) =>
+  b.className = 'text-xs font-semibold px-2 py-1 rounded-full ' + (c && c.level === 'certificate' ? 'bg-sky-200 text-sky-900' : 'bg-violet-200 text-violet-900');
+  $('#tabs').innerHTML = tabList().map(([k,l]) =>
     `<button data-act="tab" data-v="${k}" class="px-4 py-2 text-sm font-semibold rounded-t-md ${S.tab===k?'bg-slate-100 text-indigo-900':'text-indigo-200 hover:bg-indigo-800'}">${l}</button>`).join('');
 }
 function render() {
   renderHeader();
   const p = $('#panel');
+  if (!user()) { p.innerHTML = loginHTML(); return; }
+  if (S.tab === 'admin' && isAdmin()) { p.innerHTML = adminHTML(); return; }
+  if (S.tab === 'admin') S.tab = 'roster';
   if (!course()) { p.innerHTML = '<p class="p-6 text-slate-500">No course available for this selection.</p>'; return; }
   p.innerHTML = {roster:rosterHTML, attendance:attendanceHTML, gradebook:gradebookHTML, hub:hubHTML}[S.tab]();
 }
@@ -213,14 +218,14 @@ document.addEventListener('click', e => {
   else if (act === 'delSession') { if (!confirm('Remove this session and its attendance records?')) return; S.sessions = S.sessions.filter(x => x.id !== id); delete S.attendance[id]; }
   else if (act === 'addAsg') S.assignments.push({id:'as'+uid(), courseId:S.sel.course, name:'New Assignment', max:100, weight:0});
   else if (act === 'delAsg') { if (!confirm('Delete this assignment and its grades?')) return; S.assignments = S.assignments.filter(a => a.id !== id); delete S.grades[id]; }
-  else if (act === 'reset') { if (!confirm('Reset everything to the demo data?')) return; S = seed(); }
+  else if (act === 'reset') { if (!isAdmin()) return; if (!confirm('Reset everything to the demo data?')) return; S = seed(); }
   save(); render();
 });
 
 document.addEventListener('change', e => {
   const t = e.target.closest('[data-chg]'); if (!t) return;
   const k = t.dataset.chg;
-  if (k === 'center') { S.sel.center = t.value; const co = S.cohorts.find(c => c.centerId === t.value); S.sel.cohort = co ? co.id : ''; }
+  if (k === 'center') { S.sel.center = t.value; const co = S.cohorts.find(c => c.centerId === t.value && allowedCohort(c.id)); S.sel.cohort = co ? co.id : ''; }
   if (k === 'center' || k === 'cohort') { if (k === 'cohort') S.sel.cohort = t.value; const cr = S.courses.find(c => c.cohortId === S.sel.cohort); S.sel.course = cr ? cr.id : ''; }
   if (k === 'course') S.sel.course = t.value;
   if (k === 'grade') {
@@ -239,6 +244,9 @@ document.addEventListener('change', e => {
 document.addEventListener('submit', e => {
   const f = e.target.closest('[data-form]'); if (!f) return; e.preventDefault();
   const d = new FormData(f);
+  if (f.dataset.form === 'login') return doLogin(d);
+  if (f.dataset.form === 'cohort') return addCohort(d);
+  if (f.dataset.form === 'config') return saveConfig(d);
   if (f.dataset.form === 'student') {
     const sid = d.get('sid').trim(), name = d.get('name').trim(), coh = course().cohortId;
     if (cohortStudents().some(s => s.studentId.toLowerCase() === sid.toLowerCase())) { alert('That Student ID already exists in this cohort.'); return; }
@@ -268,30 +276,25 @@ function hubHTML() {
   const msg = hubMsg ? `<div class="m-4 p-3 rounded-md text-sm ${hubMsg.err ? 'bg-red-50 text-red-800' : 'bg-green-50 text-green-800'}">${hubMsg.html}</div>` : '';
   return card('Export Cohort Package',
       `<div class="p-4"><p class="text-sm text-slate-600 mb-3">Bundles the roster, sessions, attendance, assignments and grades for <b>${esc(coh.name)}</b> (${esc(coh.id)}) into one .json file to hand to an administrator.</p>
-       <button data-hub="exportPkg" class="btn">⬇ Export Cohort Package (.json)</button></div>`)
-    <!-- Cloud Sync Section -->
-<div class="p-4 border border-blue-100 rounded-lg bg-blue-50/50 flex flex-col items-center gap-2">
-  <button 
-    id="btnSyncCloud" 
-    onclick="syncToCoordinator()" 
-    class="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 px-6 rounded-lg shadow-sm transition-all flex items-center justify-center gap-2">
-    <span>🔄</span>
-    <span>Sync to Coordinator</span>
-  </button>
-  <p id="syncStatusText" class="text-sm text-gray-600 min-h-[1.25rem] text-center"></p>
-</div>
-    + card('Import &amp; Merge (Admin)',
+       <button data-hub="exportPkg" class="btn">⬇ Export Cohort Package (.json)</button>
+       <div class="mt-4 pt-4 border-t border-slate-200">
+         <button id="btnSyncCloud" onclick="syncToCoordinator()" class="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded shadow-sm flex items-center justify-center gap-2">
+           <span>🔄</span> Sync to Coordinator
+         </button>
+         <p id="syncStatusText" class="text-xs text-slate-500 mt-2 min-h-[1rem]"></p>
+       </div></div>`)
+    + (!isAdmin() ? card('Import &amp; Merge (Admin)', `<p class="p-4 text-sm text-slate-500">🔒 Import &amp; merge is limited to administrators.</p>${msg}`) : card('Import &amp; Merge (Admin)',
       `<div class="p-4"><div id="drop" data-hub="pick" class="border-2 border-dashed border-slate-300 rounded-lg p-8 text-center text-slate-500 cursor-pointer hover:bg-indigo-50">
         <div class="text-3xl">📥</div><div class="font-semibold">Drop a cohort package (.json) here, or click to browse</div>
         <div class="text-xs mt-1">New students, sessions and first-time grades merge automatically. Changed grades are sent to review.</div></div>
-        <input type="file" id="fileIn" accept=".json,application/json" data-file class="hidden"></div>${msg}`)
+        <input type="file" id="fileIn" accept=".json,application/json" data-file class="hidden"></div>${msg}`))
     + card('CSV Reports — ' + esc(c.name),
       `<div class="p-4 flex flex-wrap gap-2 items-center"><button data-hub="csvAtt" class="btn">⬇ Export Attendance CSV</button>
        <button data-hub="csvGrade" class="btn">⬇ Export Gradebook CSV</button>
        <span class="text-xs text-slate-500">Active students only · opens directly in Excel / Sheets</span></div>`);
 }
 
-function exportPkg() {
+function buildPkg() {
   const c = course(), coh = S.cohorts.find(x => x.id === c.cohortId), now = new Date().toISOString();
   const courses = S.courses.filter(x => x.cohortId === coh.id), cids = courses.map(x => x.id);
   const sessions = S.sessions.filter(x => cids.includes(x.courseId));
@@ -301,8 +304,12 @@ function exportPkg() {
   const grades = [];
   assignments.forEach(a => Object.entries(S.grades[a.id] || {}).forEach(([stu, score]) =>
     grades.push({assignmentId: a.id, studentId: stu, score, updatedAt: (S.gradeMeta[a.id] || {})[stu] || now})));
-  const pkg = {format: 'tee-cohort-package', version: 1, exportedAt: now, center: S.centers.find(x => x.id === coh.centerId),
+  const pkg = {format: 'tee-cohort-package', version: 1, exportedAt: now, exportedBy: (user() || {}).username || null, center: S.centers.find(x => x.id === coh.centerId),
     cohort: coh, courses, students, sessions, attendance, assignments, grades};
+  return {pkg, coh, students, sessions, assignments, grades};
+}
+function exportPkg() {
+  const {pkg, coh, students, sessions, assignments, grades} = buildPkg();
   const fn = `TEE_Cohort_${coh.id}_${stamp()}.json`;
   download(fn, JSON.stringify(pkg, null, 2), 'application/json');
   hubMsg = {html: `Exported <b>${esc(fn)}</b> — ${students.length} students, ${sessions.length} sessions, ${assignments.length} assignments, ${grades.length} grades.`};
@@ -406,6 +413,7 @@ function renderModal() {
 }
 
 function handleFile(f) {
+  if (!isAdmin()) return;
   if (!f) return;
   const r = new FileReader();
   r.onload = () => { try { stageImport(JSON.parse(r.result)); } catch (e) { hubMsg = {err: true, html: 'Import failed: ' + esc(e.message)}; render(); } };
@@ -430,7 +438,146 @@ document.addEventListener('dragleave', e => { const d = inDrop(e); if (d) d.clas
 document.addEventListener('drop', e => { if (inDrop(e)) { e.preventDefault(); handleFile(e.dataTransfer.files[0]); } });
 document.addEventListener('change', e => { if (e.target.matches && e.target.matches('[data-file]')) { handleFile(e.target.files[0]); e.target.value = ''; } });
 
-load(); render();
+/* ================= Authentication, RBAC, Admin & Cloud Sync ================= */
+/* NOTE: client-side only. Credentials below are MOCK values visible to anyone who views the source,
+   so this gate controls the UI, not data access. Real security needs a server-side login. */
+const SESSION_KEY = 'tee-session-v1';
+const USERS = {
+  admin:    {pw: 'adminPassword2026!', role: 'admin',   name: 'Administrator'},
+  teacher1: {pw: 'teach2026!',         role: 'teacher', name: 'Teacher 1'},
+  teacher2: {pw: 'teach2026!',         role: 'teacher', name: 'Teacher 2'}
+};
+const hasUser = n => typeof n === 'string' && Object.prototype.hasOwnProperty.call(USERS, n);
+let loginErr = null;
+function user() {
+  try { const s = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null');
+    return s && hasUser(s.username) ? {username: s.username, role: USERS[s.username].role, name: USERS[s.username].name} : null;
+  } catch (e) { return null; }
+}
+const isAdmin = () => (user() || {}).role === 'admin';
+function allowedCohort(id) {
+  const u = user(); if (!u) return false; if (u.role === 'admin') return true;
+  return ((S.teacherCohorts || {})[u.username] || []).includes(id);
+}
+function normalizeSel() {
+  const coh = S.cohorts.find(c => c.id === S.sel.cohort && allowedCohort(c.id)) || S.cohorts.find(c => allowedCohort(c.id));
+  S.sel.cohort = coh ? coh.id : ''; S.sel.center = coh ? coh.centerId : (S.centers[0] ? S.centers[0].id : '');
+  const cr = S.courses.find(c => c.id === S.sel.course && c.cohortId === S.sel.cohort) || S.courses.find(c => c.cohortId === S.sel.cohort);
+  S.sel.course = cr ? cr.id : '';
+}
+const tabList = () => !user() ? [] : [['roster','Roster'],['attendance','Attendance'],['gradebook','Gradebook'],['hub','Data Hub'], ...(isAdmin() ? [['admin','Admin']] : [])];
+
+function doLogin(d) {
+  const n = String(d.get('username') || '').trim().toLowerCase(), pw = String(d.get('password') || '');
+  if (!hasUser(n) || USERS[n].pw !== pw) { loginErr = 'Invalid username or password.'; render(); return; }
+  loginErr = null; localStorage.setItem(SESSION_KEY, JSON.stringify({username: n, at: Date.now()}));
+  S.tab = 'roster'; normalizeSel(); save(); render();
+}
+function logout() {
+  localStorage.removeItem(SESSION_KEY); pending = null; hubMsg = null; loginErr = null; $('#modal').innerHTML = ''; render();
+}
+function loginHTML() {
+  return `<div class="max-w-sm mx-auto mt-10">${card('Sign In', `<form data-form="login" class="p-4 space-y-3">
+    <label class="block text-xs font-semibold">Username<input name="username" autocomplete="username" required class="inp w-full mt-1"></label>
+    <label class="block text-xs font-semibold">Password<input type="password" name="password" autocomplete="current-password" required class="inp w-full mt-1"></label>
+    ${loginErr ? `<p class="text-sm text-red-600">${esc(loginErr)}</p>` : ''}
+    <button class="btn w-full">Sign In</button></form>`)}</div>`;
+}
+function renderUser() {
+  const u = user();
+  $('#userBox').innerHTML = u ? `<span class="px-2 py-1 rounded-full text-xs font-semibold ${u.role === 'admin' ? 'bg-amber-300 text-amber-950' : 'bg-emerald-200 text-emerald-900'}">${u.role === 'admin' ? 'Administrator' : 'Teacher'}</span>
+    <span class="font-medium">${esc(u.username)}</span><button data-auth="logout" class="px-2 py-1 rounded-md border border-indigo-400 hover:bg-indigo-800 text-xs font-semibold">Log Out</button>` : '';
+  const r = document.querySelector('[data-act="reset"]'); if (r) r.classList.toggle('hidden', !isAdmin());
+}
+
+/* ----- Admin tab ----- */
+function adminHTML() {
+  const centerOpts = S.centers.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  const create = `<form data-form="cohort" class="p-4 grid sm:grid-cols-2 gap-3 items-end">
+    <label class="text-xs font-semibold">Center<br><select name="center" class="inp w-full">${centerOpts}</select></label>
+    <label class="text-xs font-semibold">…or new center name<br><input name="newCenter" placeholder="optional" class="inp w-full"></label>
+    <label class="text-xs font-semibold">Cohort name<br><input name="name" required class="inp w-full"></label>
+    <label class="text-xs font-semibold">First course name<br><input name="course" required class="inp w-full"></label>
+    <label class="text-xs font-semibold">Level<br><select name="level" class="inp w-full"><option value="certificate">Certificate (locked 4 × 25%)</option><option value="diploma">Diploma (dynamic)</option></select></label>
+    <div><button class="btn">+ Create cohort</button></div></form>`;
+  const teachers = Object.keys(USERS).filter(u => USERS[u].role === 'teacher');
+  const rows = S.cohorts.map(c => { const ctr = S.centers.find(x => x.id === c.centerId);
+    return `<tr><td class="td font-medium">${esc(c.name)}</td><td class="td">${esc(ctr ? ctr.name : '—')}</td>
+      <td class="td text-center">${S.courses.filter(x => x.cohortId === c.id).length}</td><td class="td text-center">${S.students.filter(x => x.cohortId === c.id).length}</td>
+      <td class="td">${teachers.map(t => `<label class="mr-3 text-sm whitespace-nowrap"><input type="checkbox" data-assign="${t}" data-id="${c.id}" ${(S.teacherCohorts[t] || []).includes(c.id) ? 'checked' : ''}> ${t}</label>`).join('')}</td>
+      <td class="td text-right"><button data-auth="delCohort" data-id="${c.id}" class="text-sm underline text-red-600">Delete</button></td></tr>`; }).join('');
+  const table = `<div class="overflow-x-auto"><table class="w-full"><thead><tr><th class="th">Cohort</th><th class="th">Center</th><th class="th text-center">Courses</th><th class="th text-center">Students</th><th class="th">Teacher access</th><th class="th"></th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  const cfg = `<form data-form="config" class="p-4 flex flex-wrap gap-2 items-end"><label class="text-xs font-semibold">Coordinator endpoint (https only) — receives cohort packages via POST<br>
+    <input name="url" type="url" value="${esc(S.config.coordinatorUrl || '')}" placeholder="https://…" class="inp w-96 max-w-full"></label><button class="btn">Save</button></form>`;
+  return card('Create Cohort', create) + card('Manage Cohorts &amp; Teacher Access', table) + card('Configuration', cfg);
+}
+function addCohort(d) {
+  if (!isAdmin()) return;
+  const name = String(d.get('name')).trim(), cn = String(d.get('course')).trim(), nc = String(d.get('newCenter')).trim();
+  const lvl = d.get('level') === 'certificate' ? 'certificate' : 'diploma'; let centerId = d.get('center');
+  if (nc) { centerId = 'ctr-' + uid(); S.centers.push({id: centerId, name: nc}); }
+  if (!S.centers.some(c => c.id === centerId)) { alert('Choose or create a center first.'); return; }
+  const cid = 'coh-' + uid(), rid = 'crs-' + uid();
+  S.cohorts.push({id: cid, centerId, name}); S.courses.push({id: rid, cohortId: cid, name: cn, level: lvl});
+  if (lvl === 'certificate') [1, 2, 3, 4].forEach(i => S.assignments.push({id: 'as-' + uid(), courseId: rid, name: 'Assignment ' + i, max: 100, weight: 25}));
+  save(); render();
+}
+function delCohort(id) {
+  if (!isAdmin()) return;
+  const coh = S.cohorts.find(c => c.id === id);
+  if (!coh || !confirm(`Delete cohort "${coh.name}" with all its students, attendance and grades? This cannot be undone.`)) return;
+  const cids = S.courses.filter(c => c.cohortId === id).map(c => c.id);
+  const aids = S.assignments.filter(a => cids.includes(a.courseId)).map(a => a.id);
+  const sids = S.sessions.filter(s => cids.includes(s.courseId)).map(s => s.id);
+  aids.forEach(a => { delete S.grades[a]; delete S.gradeMeta[a]; }); sids.forEach(s => delete S.attendance[s]);
+  S.assignments = S.assignments.filter(a => !aids.includes(a.id)); S.sessions = S.sessions.filter(s => !sids.includes(s.id));
+  S.students = S.students.filter(s => s.cohortId !== id); S.courses = S.courses.filter(c => c.cohortId !== id); S.cohorts = S.cohorts.filter(c => c.id !== id);
+  Object.values(S.teacherCohorts).forEach(l => { const i = l.indexOf(id); if (i > -1) l.splice(i, 1); });
+  normalizeSel(); save(); render();
+}
+function saveConfig(d) {
+  if (!isAdmin()) return;
+  const url = String(d.get('url') || '').trim();
+  if (url && !/^https:\/\/[^\s]+$/i.test(url)) { alert('The endpoint must be an https:// URL.'); return; }
+  S.config.coordinatorUrl = url; save(); render();
+}
+
+/* ----- Sync to Coordinator ----- */
+async function syncToCoordinator() {
+  const st = $('#syncStatusText'), btn = $('#btnSyncCloud');
+  const say = (m, err) => { if (st) { st.textContent = m; st.className = 'text-xs mt-2 min-h-[1rem] ' + (err ? 'text-red-600' : 'text-green-700'); } };
+  if (!user() || !course()) return;
+  const {pkg, coh} = buildPkg(), url = (S.config.coordinatorUrl || '').trim();
+  const fn = `TEE_Cohort_${coh.id}_${stamp()}.json`, json = JSON.stringify(pkg, null, 2);
+  if (btn) btn.disabled = true;
+  try {
+    if (url && navigator.onLine) {
+      say('Syncing…');
+      const r = await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: json});
+      if (!r.ok) throw new Error('server replied ' + r.status);
+      say('✔ Synced to coordinator at ' + new Date().toLocaleString());
+    } else {
+      const file = new File([json], fn, {type: 'application/json'});
+      if (navigator.canShare && navigator.canShare({files: [file]})) { await navigator.share({files: [file], title: fn}); say('✔ Package handed to the share sheet.'); }
+      else { download(fn, json, 'application/json'); say((url ? 'You are offline — ' : 'No coordinator endpoint is configured — ') + 'package downloaded; send it to your coordinator.'); }
+    }
+  } catch (e) {
+    if (e && e.name === 'AbortError') say('Share cancelled.');
+    else { download(fn, json, 'application/json'); say('Sync failed (' + (e && e.message) + '). Package downloaded as a fallback.', true); }
+  } finally { if (btn) btn.disabled = false; }
+}
+
+document.addEventListener('click', e => {
+  const t = e.target.closest('[data-auth]'); if (!t) return;
+  if (t.dataset.auth === 'logout') logout(); else if (t.dataset.auth === 'delCohort') delCohort(t.dataset.id);
+});
+document.addEventListener('change', e => {
+  const t = e.target; if (!t.matches || !t.matches('[data-assign]') || !isAdmin() || !hasUser(t.dataset.assign)) return;
+  const l = S.teacherCohorts[t.dataset.assign] = S.teacherCohorts[t.dataset.assign] || [], i = l.indexOf(t.dataset.id);
+  if (t.checked && i < 0) l.push(t.dataset.id); if (!t.checked && i > -1) l.splice(i, 1); save();
+});
+
+load(); if (user()) { normalizeSel(); save(); } render();
 
 /* ---------- PWA: offline support (only works over https:// or localhost) ---------- */
 if ('serviceWorker' in navigator) {
