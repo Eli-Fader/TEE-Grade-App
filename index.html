@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#312e81">
+<link rel="manifest" href="./manifest.json">
+<link rel="icon" type="image/png" href="./icon-192.png">
+<link rel="apple-touch-icon" href="./icon-192.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="TEE Tracker">
+<title>TEE Course Tracker</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-100 text-slate-800 min-h-screen">
+<header class="bg-indigo-900 text-white shadow sticky top-0 z-10">
+  <div class="max-w-6xl mx-auto px-4 py-3 flex flex-wrap items-center gap-3">
+    <h1 class="font-bold text-lg mr-2">TEE Tracker</h1>
+    <select id="selCenter" class="sel" data-chg="center"></select>
+    <span class="opacity-50">➔</span>
+    <select id="selCohort" class="sel" data-chg="cohort"></select>
+    <span class="opacity-50">➔</span>
+    <select id="selCourse" class="sel" data-chg="course"></select>
+    <span id="levelBadge" class="ml-auto text-xs font-semibold px-2 py-1 rounded-full"></span>
+  </div>
+  <nav id="tabs" class="max-w-6xl mx-auto px-4 flex gap-1"></nav>
+</header>
+<main id="panel" class="max-w-6xl mx-auto p-4"></main>
+<div id="modal"></div>
+<footer class="max-w-6xl mx-auto px-4 pb-8 text-xs text-slate-500 flex justify-between">
+  <span>Data is saved automatically in this browser (localStorage).</span>
+  <button data-act="reset" class="underline hover:text-red-600">Reset demo data</button>
+</footer>
+<style>
+  .sel{background:#312e81;color:#fff;border:1px solid #6366f1;border-radius:.375rem;padding:.35rem .5rem;font-size:.875rem;max-width:14rem}
+  .th{padding:.5rem .75rem;text-align:left;font-size:.75rem;text-transform:uppercase;color:#64748b;background:#f8fafc;white-space:nowrap}
+  .td{padding:.5rem .75rem;border-top:1px solid #e2e8f0}
+  .inp{border:1px solid #cbd5e1;border-radius:.375rem;padding:.3rem .5rem;font-size:.875rem;background:#fff}
+  .btn{background:#4f46e5;color:#fff;border-radius:.375rem;padding:.35rem .8rem;font-size:.875rem;font-weight:600}
+  .btn:hover{background:#4338ca}
+</style>
+<script>
+const KEY = 'tee-tracker-v1';
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const uid = () => (window.crypto && crypto.randomUUID) ? crypto.randomUUID() :
+  'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random()*16|0; return (c=='x'?r:(r&3|8)).toString(16); });
+
+/* ---------- Demo data ---------- */
+function seed() {
+  const s = {
+    centers: [{id:'ctr1', name:'Istanbul Center'}, {id:'ctr2', name:'Ankara Center'}],
+    cohorts: [{id:'coh1', centerId:'ctr1', name:'2025 Cohort A'}, {id:'coh2', centerId:'ctr2', name:'2025 Cohort B'}],
+    courses: [
+      {id:'crs1', cohortId:'coh1', name:'Biblical Foundations', level:'certificate'},
+      {id:'crs2', cohortId:'coh2', name:'Systematic Theology', level:'diploma'}
+    ],
+    students: [], sessions: [], attendance: {}, assignments: [], grades: {},
+    sel: {center:'ctr1', cohort:'coh1', course:'crs1'}, tab: 'roster', gradeMeta: {}
+  };
+  const mk = (sid, name, cohortId) => { const st = {id:uid(), studentId:sid, name, cohortId, active:true}; s.students.push(st); return st; };
+  const a1 = mk('TEE-1001','Ayşe Demir','coh1'), a2 = mk('TEE-1002','Mehmet Kaya','coh1');
+  const b1 = mk('TEE-2001','Elena Petrova','coh2'), b2 = mk('TEE-2002','Daniel Yılmaz','coh2');
+  // Certificate: locked 4 x 25%
+  [1,2,3,4].forEach(i => s.assignments.push({id:'as1'+i, courseId:'crs1', name:'Assignment '+i, max:100, weight:25}));
+  // Diploma: dynamic (intentionally totals 100)
+  [['Essay',50,20],['Midterm Exam',100,30],['Presentation',20,20],['Final Exam',100,30]]
+    .forEach((a,i) => s.assignments.push({id:'as2'+(i+1), courseId:'crs2', name:a[0], max:a[1], weight:a[2]}));
+  const pats = {
+    [a1.id]:['P','P','L','P','P'], [a2.id]:['P','A','P','E','L'],
+    [b1.id]:['P','P','P','P','A'], [b2.id]:['L','A','A','P','E']
+  };
+  [['crs1','2025-02-'],['crs2','2025-03-']].forEach(([cid,pre]) => {
+    for (let i=0;i<5;i++) {
+      const id = 'ses'+cid+i;
+      s.sessions.push({id, courseId:cid, date: pre + String(3+i*7).padStart(2,'0')});
+      s.attendance[id] = {};
+      Object.keys(pats).forEach(stu => { if (s.students.find(x=>x.id===stu && (cid==='crs1') === (x.cohortId==='coh1'))) s.attendance[id][stu] = pats[stu][i]; });
+    }
+  });
+  const g = {as11:[88,72],as12:[90,65],as13:[76,80],as14:[85,null],
+             as21:[40,15],as22:[78,90],as23:[18,12],as24:[null,null]};
+  const gs = {as21:[44,30],as22:[85,40],as23:[16,10],as24:[92,55]};
+  Object.entries(g).forEach(([k,v]) => { s.grades[k] = {}; const ss = k.startsWith('as1') ? [a1,a2] : [b1,b2];
+    const vals = k.startsWith('as1') ? v : gs[k]; ss.forEach((st,i) => { if (vals[i]!=null) { s.grades[k][st.id] = vals[i]; (s.gradeMeta[k] = s.gradeMeta[k] || {})[st.id] = '2025-03-01T09:00:00.000Z'; } }); });
+  return s;
+}
+
+/* ---------- State ---------- */
+let S;
+function load() { try { const r = localStorage.getItem(KEY); S = r ? JSON.parse(r) : seed(); } catch(e) { S = seed(); } if (!r_ok()) S = seed(); S.gradeMeta = S.gradeMeta || {}; save(); }
+function r_ok() { return S && S.centers && S.sel; }
+function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch(e) { console.warn('Storage unavailable', e); } }
+
+const course = () => S.courses.find(c => c.id === S.sel.course);
+const cohortStudents = () => { const c = course(); return c ? S.students.filter(s => s.cohortId === c.cohortId) : []; };
+const activeStudents = () => cohortStudents().filter(s => s.active);
+const courseAssignments = () => S.assignments.filter(a => a.courseId === S.sel.course);
+const courseSessions = () => S.sessions.filter(x => x.courseId === S.sel.course).sort((a,b) => a.date.localeCompare(b.date));
+
+/* ---------- Calculations ---------- */
+function attendancePct(stuId) {
+  let present = 0, counted = 0;
+  courseSessions().forEach(se => { const v = (S.attendance[se.id]||{})[stuId];
+    if (!v || v === 'E') return; counted++; if (v === 'P' || v === 'L') present++; });
+  return counted ? Math.round(present / counted * 100) : null;
+}
+const totalWeight = () => courseAssignments().reduce((t,a) => t + (+a.weight||0), 0);
+function finalMark(stuId) {
+  const as = courseAssignments(), tw = totalWeight();
+  if (!tw) return null;
+  let earned = 0;
+  as.forEach(a => { const v = (S.grades[a.id]||{})[stuId]; if (v != null && a.max > 0) earned += (v / a.max) * a.weight; });
+  return Math.round(earned / tw * 1000) / 10;
+}
+
+/* ---------- Rendering ---------- */
+function fillSelect(el, items, val) {
+  el.innerHTML = items.map(i => `<option value="${i.id}" ${i.id===val?'selected':''}>${esc(i.name)}</option>`).join('') || '<option>— none —</option>';
+}
+function renderHeader() {
+  fillSelect($('#selCenter'), S.centers, S.sel.center);
+  fillSelect($('#selCohort'), S.cohorts.filter(c => c.centerId === S.sel.center), S.sel.cohort);
+  fillSelect($('#selCourse'), S.courses.filter(c => c.cohortId === S.sel.cohort), S.sel.course);
+  const c = course(), b = $('#levelBadge');
+  b.textContent = c ? (c.level === 'certificate' ? '🔒 Certificate Level' : '✏️ Diploma Level') : '';
+  b.className = 'ml-auto text-xs font-semibold px-2 py-1 rounded-full ' + (c && c.level === 'certificate' ? 'bg-sky-200 text-sky-900' : 'bg-violet-200 text-violet-900');
+  $('#tabs').innerHTML = [['roster','Roster'],['attendance','Attendance'],['gradebook','Gradebook'],['hub','Data Hub']].map(([k,l]) =>
+    `<button data-act="tab" data-v="${k}" class="px-4 py-2 text-sm font-semibold rounded-t-md ${S.tab===k?'bg-slate-100 text-indigo-900':'text-indigo-200 hover:bg-indigo-800'}">${l}</button>`).join('');
+}
+function render() {
+  renderHeader();
+  const p = $('#panel');
+  if (!course()) { p.innerHTML = '<p class="p-6 text-slate-500">No course available for this selection.</p>'; return; }
+  p.innerHTML = {roster:rosterHTML, attendance:attendanceHTML, gradebook:gradebookHTML, hub:hubHTML}[S.tab]();
+}
+const card = (title, body, extra='') => `<section class="bg-white rounded-lg shadow-sm border border-slate-200 mb-4">
+  <div class="px-4 py-3 border-b border-slate-200 flex flex-wrap items-center gap-2"><h2 class="font-bold">${title}</h2>${extra}</div>${body}</section>`;
+
+function rosterHTML() {
+  const list = cohortStudents();
+  const form = `<form data-form="student" class="p-4 flex flex-wrap gap-2 items-end bg-slate-50 border-b border-slate-200">
+    <label class="text-xs font-semibold">Student ID<br><input name="sid" required placeholder="e.g. TEE-1003" class="inp w-40"></label>
+    <label class="text-xs font-semibold">Full Name<br><input name="name" required placeholder="Full name" class="inp w-64"></label>
+    <button class="btn">+ Add student</button></form>`;
+  const rows = list.map(s => `<tr class="${s.active?'':'opacity-50'}">
+    <td class="td font-mono text-sm">${esc(s.studentId)}</td>
+    <td class="td font-medium ${s.active?'':'line-through'}">${esc(s.name)}</td>
+    <td class="td"><span class="text-xs font-semibold px-2 py-0.5 rounded-full ${s.active?'bg-green-100 text-green-800':'bg-slate-200 text-slate-600'}">${s.active?'Active':'Inactive'}</span></td>
+    <td class="td text-right"><button data-act="toggleStudent" data-id="${s.id}" class="text-sm underline ${s.active?'text-red-600':'text-green-700'}">${s.active?'Deactivate':'Reactivate'}</button></td></tr>`).join('');
+  return card('Cohort Roster', form + `<div class="overflow-x-auto"><table class="w-full"><thead><tr><th class="th">Student ID</th><th class="th">Name</th><th class="th">Status</th><th class="th"></th></tr></thead><tbody>${rows || '<tr><td class="td text-slate-500" colspan="4">No students yet.</td></tr>'}</tbody></table></div>`,
+    `<span class="text-xs text-slate-500">${list.filter(s=>s.active).length} active / ${list.length} total · inactive students are hidden from attendance &amp; gradebook</span>`);
+}
+
+const ST = {P:['bg-green-500 text-white','Present'], L:['bg-yellow-400 text-slate-900','Late'], A:['bg-red-500 text-white','Absent'], E:['bg-gray-400 text-white','Excused']};
+function attendanceHTML() {
+  const sess = courseSessions(), stu = activeStudents();
+  const today = new Date().toISOString().slice(0,10);
+  const form = `<form data-form="session" class="p-4 flex gap-2 items-end bg-slate-50 border-b border-slate-200">
+    <label class="text-xs font-semibold">New class session date<br><input type="date" name="date" value="${today}" required class="inp"></label>
+    <button class="btn">+ Add session</button>
+    <span class="text-xs text-slate-500 ml-2">Tap a cell to cycle: — → P → L → A → E</span></form>`;
+  const head = sess.map(se => `<th class="th text-center">${esc(se.date)}<br><button data-act="delSession" data-id="${se.id}" class="text-red-500 normal-case font-normal" title="Remove session">remove</button></th>`).join('');
+  const rows = stu.map(s => {
+    const cells = sess.map(se => { const v = (S.attendance[se.id]||{})[s.id] || '';
+      return `<td class="td text-center"><button data-act="cycle" data-ses="${se.id}" data-id="${s.id}" title="${v?ST[v][1]:'Not marked'}" class="w-11 h-9 rounded-md font-bold ${v?ST[v][0]:'border border-dashed border-slate-300 text-slate-400'}">${v||'—'}</button></td>`; }).join('');
+    const pct = attendancePct(s.id);
+    return `<tr><td class="td font-medium whitespace-nowrap">${esc(s.name)}<div class="text-xs text-slate-400 font-mono">${esc(s.studentId)}</div></td>${cells}
+      <td class="td text-center font-bold ${pct==null?'text-slate-400':pct>=75?'text-green-700':pct>=50?'text-yellow-600':'text-red-600'}">${pct==null?'—':pct+'%'}</td></tr>`; }).join('');
+  const legend = Object.entries(ST).map(([k,[c,l]]) => `<span class="inline-flex items-center gap-1 text-xs"><span class="w-5 h-5 rounded text-center font-bold ${c}">${k}</span>${l}</span>`).join(' ');
+  return card('Attendance — ' + esc(course().name),
+    form + `<div class="overflow-x-auto"><table class="w-full"><thead><tr><th class="th">Student</th>${head}<th class="th text-center">Attendance %</th></tr></thead><tbody>${rows || '<tr><td class="td text-slate-500" colspan="99">No active students.</td></tr>'}</tbody></table></div>
+    <p class="p-3 text-xs text-slate-500 border-t border-slate-200">Attendance % = (Present + Late) ÷ marked sessions, excluding Excused. &nbsp; ${legend}</p>`);
+}
+
+function gradebookHTML() {
+  const c = course(), as = courseAssignments(), stu = activeStudents(), locked = c.level === 'certificate', tw = totalWeight();
+  const badge = locked
+    ? `<span class="text-xs font-semibold px-2 py-1 rounded-full bg-sky-100 text-sky-800">🔒 Locked template: ${as.length} assignments · ${tw}%</span>`
+    : (tw === 100 ? `<span class="text-xs font-semibold px-2 py-1 rounded-full bg-green-100 text-green-800">✔ Weights total 100%</span>`
+      : `<span class="text-xs font-semibold px-2 py-1 rounded-full bg-amber-200 text-amber-900">⚠ Weights total ${tw}% (should be 100%)</span>`);
+  const head = as.map(a => locked
+    ? `<th class="th text-center">${esc(a.name)}<div class="normal-case font-normal">max ${a.max} · ${a.weight}%</div></th>`
+    : `<th class="th text-center"><input data-chg="asg" data-f="name" data-id="${a.id}" value="${esc(a.name)}" class="inp w-28 mb-1 font-semibold normal-case"><div class="normal-case font-normal flex items-center gap-1 justify-center text-xs">
+        max <input type="number" min="1" data-chg="asg" data-f="max" data-id="${a.id}" value="${a.max}" class="inp w-16">
+        <input type="number" min="0" max="100" data-chg="asg" data-f="weight" data-id="${a.id}" value="${a.weight}" class="inp w-16">%</div>
+        <button data-act="delAsg" data-id="${a.id}" class="text-red-500 normal-case font-normal text-xs">remove</button></th>`).join('');
+  const rows = stu.map(s => {
+    const cells = as.map(a => { const v = (S.grades[a.id]||{})[s.id];
+      return `<td class="td text-center"><input type="number" min="0" max="${a.max}" step="any" data-chg="grade" data-a="${a.id}" data-id="${s.id}" value="${v==null?'':v}" class="inp w-20 text-center"></td>`; }).join('');
+    const f = finalMark(s.id);
+    return `<tr><td class="td font-medium whitespace-nowrap">${esc(s.name)}<div class="text-xs text-slate-400 font-mono">${esc(s.studentId)}</div></td>${cells}
+      <td class="td text-center font-bold text-lg ${f==null?'text-slate-400':f>=50?'text-indigo-700':'text-red-600'}">${f==null?'—':f.toFixed(1)+'%'}</td></tr>`; }).join('');
+  const add = locked ? '' : `<div class="p-3 border-t border-slate-200"><button data-act="addAsg" class="btn">+ Add assignment</button></div>`;
+  return card('Gradebook — ' + esc(c.name),
+    `<div class="overflow-x-auto"><table class="w-full"><thead><tr><th class="th">Student</th>${head}<th class="th text-center">Final mark</th></tr></thead><tbody>${rows || '<tr><td class="td text-slate-500" colspan="99">No active students.</td></tr>'}</tbody></table></div>${add}
+    <p class="p-3 text-xs text-slate-500 border-t border-slate-200">Final = Σ (score ÷ max × weight) ÷ total weight × 100. Blank scores count as 0.</p>`, badge);
+}
+
+/* ---------- Events ---------- */
+document.addEventListener('click', e => {
+  const t = e.target.closest('[data-act]'); if (!t) return;
+  const id = t.dataset.id, act = t.dataset.act;
+  if (act === 'tab') S.tab = t.dataset.v;
+  else if (act === 'toggleStudent') { const s = S.students.find(x => x.id === id); s.active = !s.active; }
+  else if (act === 'cycle') {
+    const order = ['', 'P', 'L', 'A', 'E'], m = S.attendance[t.dataset.ses] = S.attendance[t.dataset.ses] || {};
+    const cur = m[id] || '', nxt = cur === 'E' ? 'P' : order[order.indexOf(cur) + 1];
+    m[id] = nxt;
+  }
+  else if (act === 'delSession') { if (!confirm('Remove this session and its attendance records?')) return; S.sessions = S.sessions.filter(x => x.id !== id); delete S.attendance[id]; }
+  else if (act === 'addAsg') S.assignments.push({id:'as'+uid(), courseId:S.sel.course, name:'New Assignment', max:100, weight:0});
+  else if (act === 'delAsg') { if (!confirm('Delete this assignment and its grades?')) return; S.assignments = S.assignments.filter(a => a.id !== id); delete S.grades[id]; }
+  else if (act === 'reset') { if (!confirm('Reset everything to the demo data?')) return; S = seed(); }
+  save(); render();
+});
+
+document.addEventListener('change', e => {
+  const t = e.target.closest('[data-chg]'); if (!t) return;
+  const k = t.dataset.chg;
+  if (k === 'center') { S.sel.center = t.value; const co = S.cohorts.find(c => c.centerId === t.value); S.sel.cohort = co ? co.id : ''; }
+  if (k === 'center' || k === 'cohort') { if (k === 'cohort') S.sel.cohort = t.value; const cr = S.courses.find(c => c.cohortId === S.sel.cohort); S.sel.course = cr ? cr.id : ''; }
+  if (k === 'course') S.sel.course = t.value;
+  if (k === 'grade') {
+    const a = S.assignments.find(x => x.id === t.dataset.a); const g = S.grades[a.id] = S.grades[a.id] || {};
+    if (t.value === '') { delete g[t.dataset.id]; delete (S.gradeMeta[a.id] || {})[t.dataset.id]; }
+    else { g[t.dataset.id] = Math.min(Math.max(parseFloat(t.value) || 0, 0), a.max); (S.gradeMeta[a.id] = S.gradeMeta[a.id] || {})[t.dataset.id] = new Date().toISOString(); }
+  }
+  if (k === 'asg') {
+    const a = S.assignments.find(x => x.id === t.dataset.id), f = t.dataset.f;
+    if (course().level === 'certificate') return; // locked
+    a[f] = f === 'name' ? (t.value.trim() || 'Untitled') : Math.max(parseFloat(t.value) || 0, f === 'max' ? 1 : 0);
+  }
+  save(); render();
+});
+
+document.addEventListener('submit', e => {
+  const f = e.target.closest('[data-form]'); if (!f) return; e.preventDefault();
+  const d = new FormData(f);
+  if (f.dataset.form === 'student') {
+    const sid = d.get('sid').trim(), name = d.get('name').trim(), coh = course().cohortId;
+    if (cohortStudents().some(s => s.studentId.toLowerCase() === sid.toLowerCase())) { alert('That Student ID already exists in this cohort.'); return; }
+    S.students.push({id:uid(), studentId:sid, name, cohortId:coh, active:true});
+  } else {
+    const date = d.get('date');
+    if (courseSessions().some(s => s.date === date)) { alert('A session already exists on that date.'); return; }
+    const id = 'ses' + uid(); S.sessions.push({id, courseId:S.sel.course, date}); S.attendance[id] = {};
+  }
+  save(); render();
+});
+
+/* ================= Phase 3: Data Hub, Sync & CSV ================= */
+let hubMsg = null, pending = null;
+const stamp = () => { const d = new Date(), p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}`; };
+function download(name, text, mime) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], {type: mime})); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+const csvCell = v => { let s = String(v ?? ''); if (/^[=+\-@\t\r]/.test(s)) s = "'" + s; return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+const toCSV = rows => '\ufeff' + rows.map(r => r.map(csvCell).join(',')).join('\r\n');
+
+function hubHTML() {
+  const c = course(), coh = S.cohorts.find(x => x.id === c.cohortId);
+  const msg = hubMsg ? `<div class="m-4 p-3 rounded-md text-sm ${hubMsg.err ? 'bg-red-50 text-red-800' : 'bg-green-50 text-green-800'}">${hubMsg.html}</div>` : '';
+  return card('Export Cohort Package',
+      `<div class="p-4"><p class="text-sm text-slate-600 mb-3">Bundles the roster, sessions, attendance, assignments and grades for <b>${esc(coh.name)}</b> (${esc(coh.id)}) into one .json file to hand to an administrator.</p>
+       <button data-hub="exportPkg" class="btn">⬇ Export Cohort Package (.json)</button></div>`)
+    + card('Import &amp; Merge (Admin)',
+      `<div class="p-4"><div id="drop" data-hub="pick" class="border-2 border-dashed border-slate-300 rounded-lg p-8 text-center text-slate-500 cursor-pointer hover:bg-indigo-50">
+        <div class="text-3xl">📥</div><div class="font-semibold">Drop a cohort package (.json) here, or click to browse</div>
+        <div class="text-xs mt-1">New students, sessions and first-time grades merge automatically. Changed grades are sent to review.</div></div>
+        <input type="file" id="fileIn" accept=".json,application/json" data-file class="hidden"></div>${msg}`)
+    + card('CSV Reports — ' + esc(c.name),
+      `<div class="p-4 flex flex-wrap gap-2 items-center"><button data-hub="csvAtt" class="btn">⬇ Export Attendance CSV</button>
+       <button data-hub="csvGrade" class="btn">⬇ Export Gradebook CSV</button>
+       <span class="text-xs text-slate-500">Active students only · opens directly in Excel / Sheets</span></div>`);
+}
+
+function exportPkg() {
+  const c = course(), coh = S.cohorts.find(x => x.id === c.cohortId), now = new Date().toISOString();
+  const courses = S.courses.filter(x => x.cohortId === coh.id), cids = courses.map(x => x.id);
+  const sessions = S.sessions.filter(x => cids.includes(x.courseId));
+  const assignments = S.assignments.filter(x => cids.includes(x.courseId));
+  const students = S.students.filter(x => x.cohortId === coh.id);
+  const attendance = {}; sessions.forEach(s => attendance[s.id] = S.attendance[s.id] || {});
+  const grades = [];
+  assignments.forEach(a => Object.entries(S.grades[a.id] || {}).forEach(([stu, score]) =>
+    grades.push({assignmentId: a.id, studentId: stu, score, updatedAt: (S.gradeMeta[a.id] || {})[stu] || now})));
+  const pkg = {format: 'tee-cohort-package', version: 1, exportedAt: now, center: S.centers.find(x => x.id === coh.centerId),
+    cohort: coh, courses, students, sessions, attendance, assignments, grades};
+  const fn = `TEE_Cohort_${coh.id}_${stamp()}.json`;
+  download(fn, JSON.stringify(pkg, null, 2), 'application/json');
+  hubMsg = {html: `Exported <b>${esc(fn)}</b> — ${students.length} students, ${sessions.length} sessions, ${assignments.length} assignments, ${grades.length} grades.`};
+  render();
+}
+
+function csvAttendance() {
+  const c = course(), sess = courseSessions();
+  const rows = [['Student ID', 'Name', ...sess.map(s => s.date), 'Attendance %']];
+  activeStudents().forEach(s => { const p = attendancePct(s.id);
+    rows.push([s.studentId, s.name, ...sess.map(se => { const v = (S.attendance[se.id] || {})[s.id]; return v ? ST[v][1] : ''; }), p == null ? '' : p + '%']); });
+  download(`TEE_Attendance_${c.id}_${stamp()}.csv`, toCSV(rows), 'text/csv;charset=utf-8');
+}
+function csvGradebook() {
+  const c = course(), as = courseAssignments();
+  const rows = [['Student ID', 'Name', ...as.map(a => `${a.name} (/${a.max}, ${a.weight}%)`), 'Final Weighted %']];
+  activeStudents().forEach(s => { const f = finalMark(s.id);
+    rows.push([s.studentId, s.name, ...as.map(a => { const v = (S.grades[a.id] || {})[s.id]; return v == null ? '' : v; }), f == null ? '' : f.toFixed(1) + '%']); });
+  download(`TEE_Gradebook_${c.id}_${stamp()}.csv`, toCSV(rows), 'text/csv;charset=utf-8');
+}
+
+/* ----- Import: validate, analyse in memory, stage ----- */
+const okId = v => typeof v === 'string' && /^[\w.-]{1,80}$/.test(v) && v !== '__proto__';
+const str = v => String(v ?? '').slice(0, 200);
+const num = (v, min) => { v = Number(v); return Number.isFinite(v) && v >= min ? v : null; };
+function chk(...ids) { ids.forEach(i => { if (!okId(i)) throw new Error('package contains an invalid ID'); }); }
+
+function stageImport(p) {
+  if (!p || p.format !== 'tee-cohort-package' || !p.cohort || !Array.isArray(p.students) || !Array.isArray(p.sessions) || !Array.isArray(p.assignments) || !Array.isArray(p.grades) || !Array.isArray(p.courses))
+    throw new Error('this is not a TEE cohort package');
+  chk(p.cohort.id, p.cohort.centerId);
+  const A = {center: null, cohort: null, courses: [], students: [], sessions: [], assignments: [], att: [], grades: [], conflicts: [], same: 0};
+  const smap = {}, sesmap = {};
+  if (p.center) { chk(p.center.id); if (!S.centers.some(x => x.id === p.center.id)) A.center = {id: p.center.id, name: str(p.center.name)}; }
+  else if (!S.centers.some(x => x.id === p.cohort.centerId)) throw new Error('package has no center information');
+  if (!S.cohorts.some(x => x.id === p.cohort.id)) A.cohort = {id: p.cohort.id, centerId: p.cohort.centerId, name: str(p.cohort.name)};
+  p.courses.forEach(c => { chk(c.id, c.cohortId);
+    if (!S.courses.some(x => x.id === c.id)) A.courses.push({id: c.id, cohortId: c.cohortId, name: str(c.name), level: c.level === 'certificate' ? 'certificate' : 'diploma'}); });
+  const allCourses = [...S.courses, ...A.courses];
+  p.students.forEach(s => { chk(s.id, s.cohortId);
+    const m = S.students.find(x => x.id === s.id) || S.students.find(x => x.cohortId === s.cohortId && x.studentId === str(s.studentId));
+    if (m) smap[s.id] = m.id; else { smap[s.id] = s.id; A.students.push({id: s.id, studentId: str(s.studentId), name: str(s.name), cohortId: s.cohortId, active: s.active !== false}); } });
+  p.sessions.forEach(s => { chk(s.id, s.courseId); if (!/^\d{4}-\d{2}-\d{2}$/.test(s.date)) return;
+    const m = S.sessions.find(x => x.id === s.id) || S.sessions.find(x => x.courseId === s.courseId && x.date === s.date);
+    if (m) sesmap[s.id] = m.id; else { sesmap[s.id] = s.id; A.sessions.push({id: s.id, courseId: s.courseId, date: s.date}); } });
+  p.assignments.forEach(a => { chk(a.id, a.courseId);
+    const lc = S.courses.find(x => x.id === a.courseId);
+    if (S.assignments.some(x => x.id === a.id) || (lc && lc.level === 'certificate')) return; // certificate template stays locked
+    const max = num(a.max, 1), w = num(a.weight, 0); if (max == null || w == null) return;
+    A.assignments.push({id: a.id, courseId: a.courseId, name: str(a.name), max, weight: w}); });
+  Object.entries(p.attendance || {}).forEach(([sid, rec]) => Object.entries(rec || {}).forEach(([stu, v]) => {
+    const ls = sesmap[sid], lu = smap[stu];
+    if (ls && lu && 'PLAE'.includes(v) && v.length === 1 && !(S.attendance[ls] || {})[lu]) A.att.push({ses: ls, stu: lu, v}); }));
+  const allA = [...S.assignments, ...A.assignments], allS = [...S.students, ...A.students];
+  p.grades.forEach(g => {
+    const stu = smap[g.studentId], a = allA.find(x => x.id === g.assignmentId), score = num(g.score, 0);
+    if (!stu || !a || score == null) return;
+    const at = isNaN(Date.parse(g.updatedAt)) ? null : g.updatedAt, cur = (S.grades[a.id] || {})[stu];
+    if (cur == null) A.grades.push({a: a.id, stu, score, at});
+    else if (cur !== score) { const s = allS.find(x => x.id === stu), c = allCourses.find(x => x.id === a.courseId);
+      A.conflicts.push({a: a.id, stu, name: s.name, course: c ? c.name : '—', asg: a.name, cur, score, at, accept: false}); }
+    else A.same++;
+  });
+  if (A.conflicts.length) { pending = A; renderModal(); } else applyImport(A);
+}
+
+function applyImport(A) {
+  if (A.center) S.centers.push(A.center);
+  if (A.cohort) S.cohorts.push(A.cohort);
+  S.courses.push(...A.courses); S.students.push(...A.students); S.sessions.push(...A.sessions); S.assignments.push(...A.assignments);
+  A.att.forEach(x => { (S.attendance[x.ses] = S.attendance[x.ses] || {})[x.stu] = x.v; });
+  const put = (a, stu, score, at) => { (S.grades[a] = S.grades[a] || {})[stu] = score; (S.gradeMeta[a] = S.gradeMeta[a] || {})[stu] = at || new Date().toISOString(); };
+  A.grades.forEach(g => put(g.a, g.stu, g.score, g.at));
+  const acc = A.conflicts.filter(c => c.accept); acc.forEach(c => put(c.a, c.stu, c.score, c.at));
+  save(); pending = null; $('#modal').innerHTML = '';
+  hubMsg = {html: `Merge complete: ${A.students.length} new students, ${A.sessions.length} new sessions, ${A.assignments.length} new assignments, ${A.att.length} attendance marks, ${A.grades.length} first-time grades. `
+    + `Conflicts: ${acc.length} accepted, ${A.conflicts.length - acc.length} kept as current. ${A.same} grades were already identical.`};
+  render();
+}
+
+function renderModal() {
+  const A = pending, m = $('#modal');
+  if (!A) { m.innerHTML = ''; return; }
+  const fmt = d => d ? new Date(d).toLocaleDateString() : '—';
+  const rows = A.conflicts.map((c, i) => `<tr><td class="td">${esc(c.name)}</td><td class="td">${esc(c.course)}</td><td class="td">${esc(c.asg)}</td>
+    <td class="td text-center font-bold">${c.cur}</td><td class="td text-center font-bold text-indigo-700">${c.score}</td><td class="td whitespace-nowrap">${fmt(c.at)}</td>
+    <td class="td whitespace-nowrap"><div class="inline-flex rounded-md overflow-hidden border border-slate-300 text-xs font-semibold">
+      <button data-hub="tog" data-i="${i}" data-v="1" class="px-2 py-1 ${c.accept ? 'bg-indigo-600 text-white' : 'bg-white'}">Accept New</button>
+      <button data-hub="tog" data-i="${i}" data-v="0" class="px-2 py-1 ${!c.accept ? 'bg-slate-700 text-white' : 'bg-white'}">Keep Current</button></div></td></tr>`).join('');
+  const n = A.accepted = A.conflicts.filter(c => c.accept).length;
+  m.innerHTML = `<div class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"><div class="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col">
+    <div class="p-4 border-b border-slate-200"><h2 class="font-bold text-lg">Review Grade Conflicts (${A.conflicts.length})</h2>
+      <p class="text-sm text-slate-600">Already staged automatically: ${A.students.length} students, ${A.sessions.length} sessions, ${A.assignments.length} assignments, ${A.grades.length} first-time grades. Nothing is saved until you finalize.</p></div>
+    <div class="overflow-auto"><table class="w-full"><thead><tr><th class="th">Student</th><th class="th">Course</th><th class="th">Assignment</th><th class="th text-center">Current Grade</th><th class="th text-center">New Grade</th><th class="th">Updated Date</th><th class="th">Decision</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="p-4 border-t border-slate-200 flex flex-wrap gap-2 items-center">
+      <button data-hub="all" data-v="1" class="text-sm underline text-indigo-700">Accept all</button>
+      <button data-hub="all" data-v="0" class="text-sm underline text-slate-600">Keep all</button>
+      <span class="text-xs text-slate-500">${n} of ${A.conflicts.length} will be overwritten</span>
+      <span class="ml-auto flex gap-2"><button data-hub="cancel" class="px-3 py-1.5 rounded-md border border-slate-300 text-sm font-semibold">Cancel import</button>
+      <button data-hub="finalize" class="btn">Finalize merge</button></span></div></div></div>`;
+}
+
+function handleFile(f) {
+  if (!f) return;
+  const r = new FileReader();
+  r.onload = () => { try { stageImport(JSON.parse(r.result)); } catch (e) { hubMsg = {err: true, html: 'Import failed: ' + esc(e.message)}; render(); } };
+  r.readAsText(f);
+}
+
+document.addEventListener('click', e => {
+  const t = e.target.closest('[data-hub]'); if (!t) return;
+  const k = t.dataset.hub;
+  if (k === 'exportPkg') exportPkg();
+  else if (k === 'csvAtt') csvAttendance();
+  else if (k === 'csvGrade') csvGradebook();
+  else if (k === 'pick') $('#fileIn').click();
+  else if (k === 'tog') { pending.conflicts[+t.dataset.i].accept = t.dataset.v === '1'; renderModal(); }
+  else if (k === 'all') { pending.conflicts.forEach(c => c.accept = t.dataset.v === '1'); renderModal(); }
+  else if (k === 'cancel') { pending = null; hubMsg = {html: 'Import cancelled — nothing was changed.'}; renderModal(); render(); }
+  else if (k === 'finalize') applyImport(pending);
+});
+const inDrop = e => e.target.closest && e.target.closest('#drop');
+document.addEventListener('dragover', e => { const d = inDrop(e); if (d) { e.preventDefault(); d.classList.add('bg-indigo-50'); } });
+document.addEventListener('dragleave', e => { const d = inDrop(e); if (d) d.classList.remove('bg-indigo-50'); });
+document.addEventListener('drop', e => { if (inDrop(e)) { e.preventDefault(); handleFile(e.dataTransfer.files[0]); } });
+document.addEventListener('change', e => { if (e.target.matches && e.target.matches('[data-file]')) { handleFile(e.target.files[0]); e.target.value = ''; } });
+
+load(); render();
+
+/* ---------- PWA: offline support (only works over https:// or localhost) ---------- */
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js', { scope: './' })
+      .catch(err => console.warn('Service worker not registered:', err));
+  });
+}
+</script>
+</body>
+</html>
