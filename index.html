@@ -553,7 +553,7 @@ async function syncToCoordinator() {
   try {
     if (url && navigator.onLine) {
       say('Syncing…');
-      const r = await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: json});
+      const r = await fetch(https://script.google.com/macros/s/AKfycbzLCgV0X2ZcFJYlbJGSQt9QZ_UkdHzfjiC4r6JhUpZIBT9viPO4lGWDVDDUSksrB_-8/exec, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: json});
       if (!r.ok) throw new Error('server replied ' + r.status);
       say('✔ Synced to coordinator at ' + new Date().toLocaleString());
     } else {
